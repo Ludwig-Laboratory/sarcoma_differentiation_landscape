@@ -1,0 +1,211 @@
+---
+title: "Osteosarcoma PDX Analysis"
+output: html_notebook
+---
+#Introduction
+This notebook analyzes three PDX osteosarcoma scRNA-seq data. The samples were acquired from the pedi biospecimen repository. 
+
+#Libraries
+```{r}
+library(Seurat)
+library(scater)
+library(harmony)
+library(readxl)
+library(stringr)
+library(tidyr)
+library(dplyr)
+source('Utilities.r')
+```
+
+#Importing Files
+The outs files from cell ranger were imported along with some metadata for merging. 
+```{r}
+list_of_files <- list.dirs("Y:/OS-PDX", recursive = FALSE)
+list_of_files <- data.frame('path' = list_of_files)
+list_of_files$path <- sapply(list_of_files$path, function(x) { paste0(x, '/outs')})
+list_of_files$h5 <- sapply(list_of_files$path, function(x) { paste0(x, '/filtered_feature_bc_matrix.h5')})
+list_of_files$library_id <- sapply(strsplit(list_of_files$path, split="/"), "[[", 3)
+list_of_files$sample_type <- sapply(strsplit(list_of_files$library_id, split="-"), "[[", 4)
+list_of_files$metrics_path <- paste0(list_of_files$path,'/metrics_summary.csv')
+```
+
+## Export Read Metrics
+```{r}
+metrics_summary <- do.call("rbind", lapply(list_of_files$metrics_path, read.csv))
+metrics_summary <- cbind(sample_id = list_of_files$library_id,metrics_summary)
+
+sum <- dplyr::select(OS_PDX_data@meta.data, orig.ident, nCount_RNA, nFeature_RNA, percent.mt)
+tb1 <- sum %>% group_by(orig.ident) %>% dplyr::summarize(`# cells or nuclei` = length(orig.ident),`# UMI` = median(nCount_RNA) , `# gene` = median(nFeature_RNA),`% mito.content` = median(percent.mt))
+metrics_summary <- cbind(metrics_summary[,], tb1[match(metrics_summary$sample_id, tb1$orig.ident),-1])
+metrics_summary$`% mito.content` <- round(metrics_summary$`% mito.content`,2) %>% paste0('%')
+```
+
+## Reading the 10x_h5
+```{r}
+OS_PDX_h5.list <- lapply(list_of_files$h5, Read10X_h5)
+names(OS_PDX_h5.list) <- list_of_files$library_id
+OS_PDX.list <- lapply( OS_PDX_h5.list ,function(x) {CreateSeuratObject(counts = x) })
+names(OS_PDX.list) <- list_of_files$library_id
+
+for(i in 1:length(OS_PDX.list)) {
+  OS_PDX.list[[i]]<- RenameCells(object = OS_PDX.list[[i]], new.names = paste0(
+    sapply(strsplit(as.character(colnames(OS_PDX.list[[i]])), split="-"), "[[", 1),
+    "-", i))
+}
+
+OS_PDX_data <- OS_PDX.list[[1]]
+for (i in 2:length(OS_PDX.list)){
+  OS_PDX_data <- merge(OS_PDX_data, OS_PDX.list[[i]])
+}
+```
+
+##Adding Metadata
+```{r}
+OS_PDX_data <- PercentageFeatureSet( OS_PDX_data, pattern = "^MT-", col.name = "percent.mt", assay = 'RNA')
+
+library(plyr)
+gemgroup <- sapply(strsplit(rownames(OS_PDX_data@meta.data), split="-"), "[[", 2)
+OS_PDX_data<- AddMetaData(object=OS_PDX_data, metadata=data.frame(gemgroup=gemgroup, row.names=rownames(OS_PDX_data@meta.data)))
+
+OS_PDX_data$orig.ident <- mapvalues(OS_PDX_data$gemgroup,unique(OS_PDX_data$gemgroup), as.character(list_of_files$library_id))
+
+OS_PDX_data$sample_type <-  mapvalues(OS_PDX_data$gemgroup,unique(OS_PDX_data$gemgroup), as.character(list_of_files$sample_type))
+
+OS_PDX_data$patient <- sapply(strsplit(OS_PDX_data$orig.ident, split="-"), "[[", 3)
+
+OS_PDX_data$tissue_state <- OS_PDX_data$sample_type 
+OS_PDX_data$tissue_state[OS_PDX_data$tissue_state == 'cold' | OS_PDX_data$tissue_state == 'warm'] <- 'Fresh' 
+OS_PDX_data$tissue_state[OS_PDX_data$tissue_state == 'nuclei'] <- 'Frozen' 
+
+OS_PDX_data$sample_type <- stringr::str_to_title(OS_PDX_data$sample_type)
+
+OS_PDX_data$sample_id <- factor(sapply(strsplit(as.character(OS_PDX_data$orig.ident), split="OS-"), "[[", 2))
+```
+
+## Creating SCE for scater processing
+```{r}
+OS_PDX_data@active.ident <- factor(OS_PDX_data$orig.ident)
+OS_PDX_data.sce <- as.SingleCellExperiment(OS_PDX_data)
+```
+
+## MADS for outlier
+```{r}
+discard.mito <- isOutlier(OS_PDX_data.sce$percent.mt,
+    type="higher", batch=OS_PDX_data.sce$orig.ident, nmads = 2)
+mito.plot <- plotColData(OS_PDX_data.sce, x="orig.ident", y="percent.mt",
+    colour_by=I(discard.mito)) + theme(axis.text.x = element_text(angle =90)) + xlab('') + labs(fill = 'Outlier') + ylab('% Mitochondrial Mapping')
+
+discard.counts <- isOutlier(OS_PDX_data.sce$nCount_RNA, nmads = 2, log = TRUE,
+    type="lower", batch=OS_PDX_data.sce$orig.ident)
+counts.plot <- plotColData(OS_PDX_data.sce, x="orig.ident", y="nCount_RNA",
+    colour_by=I(discard.counts)) + theme(axis.text.x = element_text(angle =90)) + xlab('') + ylab('Counts')
+
+discard.features <- isOutlier(OS_PDX_data.sce$nFeature_RNA, nmads = 2, log = TRUE,
+    type="lower", batch=OS_PDX_data.sce$orig.ident)
+gene.plot <- plotColData(OS_PDX_data.sce, x="orig.ident", y="nFeature_RNA",
+    colour_by=I(discard.features)) + theme(axis.text.x = element_text(angle =90)) + xlab('') + ylab('Genes')
+```
+
+## Visualize outliers
+```{r}
+mito.plot
+counts.plot + scale_y_log10()
+gene.plot + scale_y_log10()
+```
+
+#Save preprocessed Data
+```{r}
+saveRDS(OS_PDX_data, '2021-01-05 OS_PDX_data.rds')
+```
+
+```{r}
+OS_PDX_data <- readRDS('2021-01-05 OS_PDX_data.rds')
+```
+
+#Filter Cells
+```{r}
+OS_PDX_data <- AddMetaData(OS_PDX_data, discard.counts, col.name = 'discard.counts') 
+OS_PDX_data <- AddMetaData(OS_PDX_data, discard.mito, col.name = 'discard.mito') 
+OS_PDX_data <- AddMetaData(OS_PDX_data, discard.features, col.name = 'discard.features')
+OS_PDX_data <- subset(OS_PDX_data, subset = discard.features == FALSE & discard.mito == FALSE & discard.counts == FALSE & percent.mt < 25 & nCount_RNA > 1000 & nFeature_RNA > 500)
+```
+
+#Seurat Processing
+```{r}
+OS_PDX_data <- NormalizeData(OS_PDX_data, verbose = FALSE)
+OS_PDX_data <- FindVariableFeatures(OS_PDX_data, selection.method = "vst", 
+        nfeatures = 2000, verbose = FALSE)
+OS_PDX_data <- ScaleData(OS_PDX_data, verbose = FALSE)
+OS_PDX_data <- RunPCA(OS_PDX_data, npcs = 30, verbose = FALSE)
+ElbowPlot(OS_PDX_data)
+OS_PDX_data <- RunUMAP(OS_PDX_data, reduction = "pca", dims = 1:15)
+DimPlot(OS_PDX_data, reduction = "umap", group.by = "orig.ident", label = TRUE, repel= TRUE)
+```
+
+```{r}
+saveRDS(OS_PDX_data, '2021-01-05 OS_PDX_data.subset.rds')
+```
+
+#Loading the Data
+
+```{r}
+OS_PDX_data <- readRDS('../RDS/2021-01-05 OS_PDX_data.subset.rds')
+
+#Adding colors
+metadata <- OS_PDX_data@meta.data
+sample_type_color = setNames(brewer.pal((length(unique(metadata[,'sample_type']))),'Dark2'),
+                                                unique(metadata[,'sample_type']))
+patient_color = setNames(brewer.pal((length(unique(metadata[,'lab_id']))), 'Paired'),unique(metadata[,'lab_id']))
+
+OS_PDX_data$sample_type <- factor(OS_PDX_data$sample_type, levels= c('Warm', 'Nuclei'))
+    sample_type_color = setNames(c("#1B9E77","#D95F02","#7570B3" ),c('Nuclei', 'Warm', 'Cold'))
+```
+
+#Osteosarcoma type
+```{r}
+signature_genes <- list(Osteoblastic = c('RUNX2', 'SPP1', 'COL1A1', 'CDH11', 'IBSP', 'DCN', 'FOS', 'PTH1R'),
+                        Chondroblastic = c('COL2A1', 'SOX9', 'ACAN','PTHLH'),
+                        Fibroblastic = c('THY1', 'NT5E','CXCL12', 'AXL', 'YAP1', 'SNAI2', 'TWIST1', 'VIM'))
+
+
+os_warm <- DotPlot(OS_PDX_data[,OS_PDX_data$sample_type %in% 'Warm'], group.by = 'lab_id', features = signature_genes) + theme(axis.text.x = element_text(angle = 90), legend.position = 'bottom', axis.title = element_blank())
+os_nuclei <- DotPlot(OS_PDX_data[,OS_PDX_data$sample_type %in% 'Nuclei'], group.by = 'lab_id',features = signature_genes) + theme(axis.text.x = element_text(angle = 90), legend.position = 'bottom', axis.title = element_blank())
+
+```
+
+#Analyze only the Cell data 
+It is called Warm because the PDX was dissociated under 'Warm' conditions (37 degrees C)
+```{r}
+OS_PDX_Warm <- OS_PDX_data[,OS_PDX_data$sample_type %in% 'Warm']
+```
+
+```{r}
+OS_PDX_Warm <- NormalizeData(OS_PDX_Warm) %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA %>%
+  RunUMAP(dims = 1:15)
+```
+
+
+#UMAPs
+## Lab-IDs
+```{r}
+OS_PDX_Warm@active.ident <- OS_PDX_Warm$lab_id
+DimPlot(OS_PDX_Warm, group.by = 'lab_id', label = T)
+```
+## Important Feaures
+```{r}
+FeaturePlot(OS_PDX_Warm, c('RUNX2','SOX9', 'VIM', 'MKI67'), label =T)
+```
+
+## Finding clusters
+```{r}
+OS_PDX_Warm@active.assay <- 'RNA'
+OS_PDX_Warm <- FindNeighbors(OS_PDX_Warm, dims = 1:15)
+OS_PDX_Warm <- FindClusters(OS_PDX_Warm, res = 0.5)
+```
+
+```{r}
+DimPlot(OS_PDX_Warm, label = T)
+```

@@ -1,0 +1,252 @@
+---
+title: "Creating the MTL"
+output: html_notebook
+---
+#Introduction
+This notebook imports single-cell data used to generate the Mesenchymal Tissue Landscape. It consists of adipogenesis and osteogenesis differentiation
+
+#Libraries
+```{r}
+library(Seurat)
+library(scater)
+library(harmony)
+library(readxl)
+library(plyr)
+```
+#Import Data
+##Load Data from File Path
+```{r}
+aggregate <- read_excel("MTL v4/FilePath.xlsx", 
+    col_types = c("text", "text", "text", 
+        "text", "text"))
+```
+
+##Export Quality Metrics from Reads
+```{r}
+aggregate$path <- sapply(strsplit(aggregate$molecule_h5, split="filtered_feature_bc_matrix.h5"), "[[", 1)
+aggregate$metrics_path <- paste0(aggregate$path,'/metrics_summary.csv')
+metrics_summary <- do.call("rbind", lapply(aggregate$metrics_path, read.csv))
+metrics_summary <- cbind(sample_id = aggregate$library_id,metrics_summary)
+```
+
+##Read 10x_h5
+```{r}
+MTL_h5.list <- lapply(aggregate$molecule_h5, Read10X_h5)
+names(MTL_h5.list) <- aggregate$library_id
+MTL.list<- lapply( MTL_h5.list ,function(x) {CreateSeuratObject(counts = x) })
+names(MTL.list) <- aggregate$library_id
+```
+
+##Rename cells so that there are no overlaps between libraries
+```{r}
+for(i in 1:length(aggregate$molecule_h5)) {
+  MTL.list[[i]]<- RenameCells(object = MTL.list[[i]], new.names = paste0(
+    sapply(strsplit(as.character(colnames(MTL.list[[i]])), split="-"), "[[", 1),
+    "-", i))
+}
+```
+
+##Merge Files
+```{r}
+MTL <- MTL.list[[1]]
+for (i in 2:length(MTL.list)){
+  MTL <- merge(MTL, MTL.list[[i]])
+}
+```
+
+##Add some initial metadata for integration purposes
+```{r}
+MTL <- PercentageFeatureSet( MTL, pattern = "^MT-", col.name = "percent.mt", assay = 'RNA')
+
+gemgroup <- sapply(strsplit(rownames(MTL@meta.data), split="-"), "[[", 2)
+MTL<- AddMetaData(object=MTL, metadata=data.frame(gemgroup=gemgroup, row.names=rownames(MTL@meta.data)))
+
+MTL$Batch.ID <- mapvalues(MTL$gemgroup,unique(MTL$gemgroup), aggregate$`Batch ID`)
+MTL$Condition <- mapvalues(MTL$gemgroup,unique(MTL$gemgroup), as.character(aggregate$Condition))
+MTL$orig.ident <- mapvalues(MTL$gemgroup,unique(MTL$gemgroup), as.character(aggregate$library_id))
+lineage <- sapply(strsplit(as.character(MTL@meta.data$Condition), split=" "), "[[", 1)
+MTL <- AddMetaData(object=MTL, metadata=data.frame(Lineage=lineage, row.names=rownames(MTL@meta.data)))
+meta.data <- MTL@meta.data
+```
+
+## Relevel for Figures
+```{r}
+MTL.sce <- as.SingleCellExperiment(MTL)
+MTL.sce <- MTL.sce[,MTL.sce$gemgroup %in% as.character(c(1:27))]
+
+levels = c( "Adipo D0_1" ,"Adipo D0_2"  ,"Adipo 0H","Adipo 2H" , "Adipo 4H", "Adipo 8H", "Adipo 12H"  ,"Adipo D0.5", "Adipo D1"  ,  "Adipo D2" ,"Adipo D3_1", "Adipo D3_2", "Adipo D7_1", "Adipo D7_2" , "Adipo D10" , "Adipo D14", "Osteo D0",  "Osteo D0.5" ,"Osteo D1" ,  "Osteo D2"    ,"Osteo D3" ,  "Osteo D5" ,  "Osteo D7_1" ,"Osteo D7_2", "Osteo D10" , "Osteo D14",  "Osteo D21")
+MTL.sce$orig.ident <- factor(MTL.sce$orig.ident ,levels = levels)
+```
+
+## Find Outliers
+```{r}
+discard.mito <- isOutlier(MTL.sce$percent.mt,
+    type="higher", batch=MTL.sce$orig.ident)
+mito.plot <- plotColData(MTL.sce, x="orig.ident", y="percent.mt",
+    colour_by=I(discard.mito)) + theme(axis.text.x = element_text(angle =90)) + xlab('') + labs(fill = 'Outlier') + ylab('% Mitochondrial Mapping')
+
+discard.counts <- isOutlier(MTL.sce$nCount_RNA, nmads = 3, log = TRUE,
+    type="both", batch=MTL.sce$orig.ident)
+counts.plot <- plotColData(MTL.sce, x="orig.ident", y="nCount_RNA",
+    colour_by=I(discard.counts)) + theme(axis.text.x = element_text(angle =90)) + xlab('') + ylab('Counts')
+
+discard.features <- isOutlier(MTL.sce$nFeature_RNA, nmads = 3, log = TRUE,
+    type="both", batch=MTL.sce$orig.ident)
+gene.plot <- plotColData(MTL.sce, x="orig.ident", y="nFeature_RNA",
+    colour_by=I(discard.features)) + theme(axis.text.x = element_text(angle =90)) + xlab('') + ylab('Genes')
+```
+
+### Outlier Plot
+```{r}
+pdf('MTLv4_qc_plot.pdf', width = 6, height  = 3)
+mito.plot
+counts.plot + scale_y_log10()
+gene.plot + scale_y_log10()
+dev.off()
+```
+
+##Save QC plots
+```{r}
+pdf('MTL_qc_plots.pdf',width=6,height=4)
+RidgePlot(MTL, group.by = "orig.ident", features = c("nCount_RNA")) + ggtitle("Counts")
+RidgePlot(MTL, group.by = "orig.ident", features = c("percent.mt")) + ggtitle("% Mitochondrial")
+FeaturePlot(MTL, reduction = 'umap', features=c('percent.mt', "nFeature_RNA", 'nCount_RNA'), combine= FALSE)
+FeaturePlot(MTL.subset, reduction = 'umap', features=c('percent.mt', "nFeature_RNA", 'nCount_RNA'), combine= FALSE)
+dev.off()
+```
+
+##Filter reads and genes
+```{r}
+MTL <- MTL[, MTL$gemgroup %in% as.character(c(1:27))]
+MTL <- AddMetaData(MTL, discard.counts, col.name = 'discard.counts') 
+MTL <- AddMetaData(MTL, discard.mito, col.name = 'discard.mito') 
+MTL <- AddMetaData(MTL, discard.features, col.name = 'discard.features')
+MTL$old.ident <- 'MTL'
+MTL.subset <- subset(MTL, subset = discard.features == FALSE & discard.mito == FALSE & discard.counts == FALSE)
+MTL
+MTL.subset
+```
+
+##QC after filtering
+```{r}
+pdf('MTLv4_qc_plots_no_groups.pdf',width=6,height=4)
+MTL_qc_plots.list <- list()
+MTL@active.ident <- factor(MTL$old.ident)
+MTL.subset@active.ident <- factor(MTL$old.ident)
+MTL_qc_plots.list[[1]] <- RidgePlot(MTL, group.by = "old.ident", features = c("nCount_RNA"), log = TRUE, cols = 'grey') + ggtitle("Counts per cell") + theme(axis.text.y = element_blank(), axis.title.y = element_blank())+ NoLegend() +scale_x_log10(limits = c(100,1e5))
+MTL_qc_plots.list[[2]] <- RidgePlot(MTL, group.by = "old.ident", features = c("nFeature_RNA"), log = TRUE, cols = 'grey') + ggtitle("Genes per cell") + theme(axis.text.y = element_blank(), axis.title.y = element_blank())+ NoLegend() +scale_x_log10(limits = c(100,1e4))
+MTL_qc_plots.list[[3]] <- RidgePlot(MTL, group.by = "old.ident", features = c("percent.mt"), cols = 'grey') + ggtitle("% Mitochondrial Mapping") + theme(axis.text.y = element_blank(), axis.title.y = element_blank()) + NoLegend()  + xlim(0,100) 
+MTL_qc_plots.list[[4]] <- FeatureScatter(MTL, 'percent.mt', 'nCount_RNA', cols = 'grey', pt.size = 0.1) + NoLegend() + xlab('% Mitochondrial Mapping') + ylab("Counts per cell") + theme(axis.text.y =element_text(size=6)) + xlim(0,100)  + ylim(0,120000) + scale_y_log10()
+MTL_qc_plots.list[[5]] <- RidgePlot(MTL.subset, group.by = "old.ident", features = c("nCount_RNA"), log = TRUE, cols = 'grey') + ggtitle("Counts per cell") + theme(axis.text.y = element_blank(), axis.title.y = element_blank())+ NoLegend()  +scale_x_log10(limits = c(100,1e5))
+MTL_qc_plots.list[[6]] <- RidgePlot(MTL.subset, group.by = "old.ident", features = c("nFeature_RNA"), log = TRUE, cols = 'grey') + ggtitle("Genes per cell") + theme(axis.text.y = element_blank(), axis.title.y = element_blank())+ NoLegend() +scale_x_log10(limits = c(100,1e4))
+MTL_qc_plots.list[[7]] <- RidgePlot(MTL.subset, group.by = "old.ident", features = c("percent.mt"), cols = 'grey') + ggtitle("% Mitochondrial Mapping") + theme(axis.text.y = element_blank(), axis.title.y = element_blank()) + NoLegend() + xlim(0,100) 
+MTL_qc_plots.list[[8]] <- FeatureScatter(MTL.subset, 'percent.mt', 'nCount_RNA', cols = 'grey', pt.size = 0.1) + NoLegend() + xlab('% Mitochondrial Mapping') + ylab("Counts per cell") +theme( axis.text.y =element_text(size=6)) + xlim(0,100) + ylim(0,120000)+ scale_y_log10()
+
+MTL_qc_plots.list  <- lapply(MTL_qc_plots.list , function(x){x + theme(plot.title =element_text(size = 10),axis.text.x = element_text(size = 6), text = element_text(size = 6))})
+
+plot_grid(MTL_qc_plots.list[[1]],MTL_qc_plots.list[[2]],MTL_qc_plots.list[[3]],MTL_qc_plots.list[[4]],
+          MTL_qc_plots.list[[5]],MTL_qc_plots.list[[6]],MTL_qc_plots.list[[7]],MTL_qc_plots.list[[8]],
+          ncol = 4)
+
+dev.off()
+```
+
+#save the unintegrated version
+```{r}
+#saveRDS(MTL, '2020-06-23 MTL unintegrated.rds')
+```
+
+#Removing some tissue cultured MSC and osteoblast
+```{r}
+MTL.integrated <- MTL.subset[, !(MTL.subset$gemgroup %in% as.character(28:30))]
+MTL.integrated <- MTL.subset
+```
+
+```{r}
+#saveRDS(MTL.integrated, "2020-06-18 MTLv4 integrated.RDS")
+MTL.integrated <- readRDS("2020-06-18 MTLv4 integrated harmony.RDS")
+```
+
+#Data Normalization
+```{r}
+MTL.integrated <- SCTransform(MTL.integrated, verbose = TRUE, variable.features.n= NULL)
+```
+
+```{r}
+FeatureScatter(MTL.integrated, 'nCount_SCT', 'GAPDH')
+FeatureScatter(MTL.integrated, 'nCount_RNA', 'GAPDH')
+```
+
+
+#Add Cell Cycle Score
+```{r}
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+MTL.integrated <- CellCycleScoring(MTL.integrated, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+MTL.integrated$CC.Difference <- MTL.integrated$S.Score - MTL.integrated$G2M.Score
+```
+
+#Dimensional Reduction
+```{r}
+MTL.integrated <- RunPCA(MTL.integrated)
+ElbowPlot(MTL.integrated, ndims = 50)
+MTL.integrated <- RunUMAP(MTL.integrated, dims = 1:50, reduction.name = 'unint_umap', reduction.key = 'unint_umap_')
+DimPlot(MTL.integrated, group.by = 'Batch.ID', reduction = 'unint_umap')
+```
+
+```{r}
+require(PCAtools)
+#x <- MTL.integrated@assays[["SCT"]]@scale.data
+#p <- irlba::irlba(A = t(x), nv = 50)
+sdev <- MTL.integrated@reductions[["pca"]]@stdev #p$d/sqrt(max(1, ncol(x) - 1))
+elbow <- findElbowPoint(sdev)
+ElbowPlot(MTL.integrated,ndims = 50) + geom_vline(xintercept = elbow, linetype="dashed", 
+                color = "blue", size=1.5)
+```
+#Neighbors
+```{r}
+MTL.integrated <- FindNeighbors(MTL.integrated, k.param = 100)
+MTL.integrated <- FindClusters(MTL.integrated, algorithm = 1, resolution  = 0.02)
+DimPlot(MTL.integrated, group.by = c('Batch.ID', 'seurat_clusters'), reduction = 'unint_umap')
+```
+
+#Run Harmony
+```{r}
+#tau protects overclustering small datasets 
+#theta is the diversity clustering penalty. high numbers encourage more diversity
+#max.iter.harmony = 40, theta = 4, lambda = 1, dims.use = 1:50, tau = 300 , reference_values = '2'
+MTL.integrated <- RunHarmony(MTL.integrated,   group.by.vars = c('Batch.ID'), assay.use = 'SCT', max.iter.harmony = 40, theta = 4, lambda = 0.7, dims.use = 1:50, tau = 300 , reference_values = '2')
+MTL.integrated <- RunUMAP(MTL.integrated, dims = 1:20, reduction = 'harmony')
+#DimPlot(MTL.integrated, group.by = 'Batch.ID', reduction = 'unint_umap')
+DimPlot(MTL.integrated, group.by = c('Batch.ID'), reduction ='umap', combine = FALSE)
+```
+
+
+#Add doublets
+```{r}
+MTL.integrated.sce <- as.SingleCellExperiment(MTL.integrated, assay= 'SCT')
+dbl.dens <- doubletCells(MTL.integrated.sce, subset.row=MTL.integrated@assays[["SCT"]]@var.features, 
+    d=ncol(reducedDim(MTL.integrated.sce)))
+summary(dbl.dens)
+```
+
+```{r}
+MTL.integrated.sce$DoubletScore <- log10(dbl.dens+1)
+MTL.integrated$DoubletScore <- log10(dbl.dens+1)
+plotUMAP(MTL.integrated.sce, colour_by="DoubletScore")
+```
+
+```{r}
+FeaturePlot(MTL.integrated, features = c('SPP1'), reduction = 'umap')
+```
+
+```{r}
+write.csv(Embeddings(MTL.integrated, 'pca'), 'mtl_pca.csv')
+write.csv(MTL.integrated@meta.data, 'mtl_metadata.csv')
+```
+
+```{r}
+#saveRDS(MTL.integrated, "2020-06-24 MTLv4 integrated harmony.RDS")
+```
+
+
