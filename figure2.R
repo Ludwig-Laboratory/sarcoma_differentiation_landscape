@@ -276,18 +276,35 @@ saveRDS(MTL_obj, file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 MTL_obj = readRDS(file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 
 
-# YAP/TAZ plot for supplement
-yaptaz = list(c("YAP1", "TAZ", "TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1"))
-MTL_obj <- AddModuleScore(MTL_obj, yaptaz, name = "YAPTAZ")
-#MTL_obj$YAPTAZ1[WhichCells(MTL_obj, idents=c("MSC-H","MSC-L"), invert=T)] = NA
-p1 <- FeaturePlot(MTL_obj, "YAPTAZ1", reduction="umap_harmony", label=T,
-            #cells = WhichCells(MTL_obj, idents=c("MSC-H","MSC-L"))
-            ) + theme(aspect.ratio = 1) + theme(axis.title.x = element_blank(),
-                                                axis.title.y = element_blank()) + ggtitle("YAP/TAZ signature")
-p2 <- VlnPlot(MTL_obj, "YAPTAZ1", idents=c("MSC-H","MSC-L")) + theme(axis.title.x = element_blank()) + ggtitle("YAP/TAZ signature")
-ggpubr::ggarrange(p1,p2,widths = c(2, 1))
 
-p4 <- DotPlot(MTL_obj, features = yaptaz[[1]], idents = c("MSC-H","MSC-L"))
-p3 <- DoHeatmap(MTL_obj, features = yaptaz[[1]], assay="SCT", slot="counts",
-          cells = WhichCells(MTL_obj, idents=c("MSC-H","MSC-L")))
-ggpubr::ggarrange(p4,p3)
+#### SUPPLEMENTAL FIGURE 1: YAP/TAZ in MTL
+
+# demonstrate YAP1/TAZ transcriptional stimulation
+# genes from MSigDB C2: Curated Canonical Pathways (CP:Reactome): REACTOME_YAP1_AND_WWTR1_TAZ_STIMULATED_GENE_EXPRESSION
+# https://www.gsea-msigdb.org/gsea/msigdb/cards/REACTOME_YAP1_AND_WWTR1_TAZ_STIMULATED_GENE_EXPRESSION
+# and another reference: CTGF (alias CCN2), CYR61, IGFBP5, ANKRD1 (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5190017/)
+yaptaz = c("YAP1", "TAZ", "WWTR1",
+           "CTGF", "GATA4", "HIPK1", "HIPK2", "KAT2B", "NKX2-5",
+           "TBX5", "TEAD1", "TEAD2", "TEAD3", "TEAD4",
+           "CYR61", "IGFBP5", "ANKRD1") %>% sort
+
+# score pathway in MTL
+MTL_obj <- AddModuleScore(MTL_obj, list(yaptaz), name = "YAPTAZ")
+
+# plot UMAP colored by YAP/TAZ and Violins of each cluster
+p1 <- FeaturePlot(MTL_obj, "YAPTAZ1", reduction="umap_harmony", label=T) +
+  theme(aspect.ratio = 1,
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) + ggtitle("YAP/TAZ signature")
+p2 <- VlnPlot(MTL_obj, "YAPTAZ1", pt.size = 0,
+              fill.by = "ident") +
+  theme(axis.title.x = element_blank(), legend.position = "none") + ggtitle("YAP/TAZ signature")
+ggpubr::ggarrange(p1,p2,widths = c(1.2, 1), align = "h")
+
+# dotplot of each gene
+p3 <- DotPlot(MTL_obj, features = yaptaz) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        axis.title.y = element_blank()) +
+  labs(x = "YAP/TAZ Genes") +
+  scale_y_discrete(limits=rev)
+p3
