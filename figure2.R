@@ -140,16 +140,23 @@ MTL_obj = RenameIdents(MTL_obj, `0` = "UD",
                        `10` = "MSC-L",
                        `11` = "A2",
                        `12` = "A4")
-levels(MTL_obj) <- c("UD", "CP", "MSC-H", "MSC-L",
-                     "O1", "O2", "A1", "A2", "A3", "A4", "C1", "C2", "C3")
+levels(MTL_obj) <- c("UD", "MSC-H", "MSC-L",
+                     "O1", "O2", "A1", "A2", "A3", "A4", "CP", "C1", "C2", "C3")
 MTL_obj$cluster_annotation = Idents(MTL_obj)
-DimPlot(MTL_obj, reduction = 'umap_harmony', label=T)
 
 
 # UMAPs: clusters, lineage, time (scaled)
-DimPlot(MTL_obj, reduction = 'umap_harmony', label=T) + theme(legend.position = "bottom", aspect.ratio = 1)
-DimPlot(MTL_obj, group.by = 'Lineage', reduction = 'umap_harmony', label=T) + NoLegend() + theme(aspect.ratio = 1)
-FeaturePlot(MTL_obj, features = "time.scaled", reduction="umap_harmony") + theme(aspect.ratio = 1) & viridis::scale_color_viridis()
+DimPlot(MTL_obj, reduction = 'umap_harmony', label=T) + theme(legend.position = "bottom", aspect.ratio = 1,
+                                                              axis.title.x = element_blank(),
+                                                              axis.title.y = element_blank())
+DimPlot(MTL_obj, group.by = 'Lineage', reduction = 'umap_harmony', label=T) + NoLegend() + theme(aspect.ratio = 1,
+                                                                                                 axis.title.x = element_blank(),
+                                                                                                 axis.title.y = element_blank())
+FeaturePlot(MTL_obj, features = "time.scaled", reduction="umap_harmony") +
+  ggtitle("Time (scaled)") +
+  theme(aspect.ratio = 1,
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) & viridis::scale_color_viridis()
 #FeaturePlot(MTL_obj, features = "Time", reduction="umap_harmony") & viridis::scale_color_viridis()
 #DimPlot(MTL_obj, group.by = 'anno', reduction = 'umap_harmony', label=T)
 #DimPlot(MTL_obj, group.by = 'Phase', reduction = 'umap_harmony')
@@ -268,3 +275,19 @@ markers.pos %>% group_by(cluster) %>%
 saveRDS(MTL_obj, file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 MTL_obj = readRDS(file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 
+
+# YAP/TAZ plot for supplement
+yaptaz = list(c("YAP1", "TAZ", "TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1"))
+MTL_obj <- AddModuleScore(MTL_obj, yaptaz, name = "YAPTAZ")
+#MTL_obj$YAPTAZ1[WhichCells(MTL_obj, idents=c("MSC-H","MSC-L"), invert=T)] = NA
+p1 <- FeaturePlot(MTL_obj, "YAPTAZ1", reduction="umap_harmony", label=T,
+            #cells = WhichCells(MTL_obj, idents=c("MSC-H","MSC-L"))
+            ) + theme(aspect.ratio = 1) + theme(axis.title.x = element_blank(),
+                                                axis.title.y = element_blank()) + ggtitle("YAP/TAZ signature")
+p2 <- VlnPlot(MTL_obj, "YAPTAZ1", idents=c("MSC-H","MSC-L")) + theme(axis.title.x = element_blank()) + ggtitle("YAP/TAZ signature")
+ggpubr::ggarrange(p1,p2,widths = c(2, 1))
+
+p4 <- DotPlot(MTL_obj, features = yaptaz[[1]], idents = c("MSC-H","MSC-L"))
+p3 <- DoHeatmap(MTL_obj, features = yaptaz[[1]], assay="SCT", slot="counts",
+          cells = WhichCells(MTL_obj, idents=c("MSC-H","MSC-L")))
+ggpubr::ggarrange(p4,p3)
