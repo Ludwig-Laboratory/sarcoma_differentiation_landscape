@@ -194,19 +194,8 @@ resdir = "Results"
 # write markers to a csv
 write_csv(markers.all, file.path(resdir, "MTL_cluster_markers.csv"))
 
-markers.pos = FindAllMarkers(MTL_obj, only.pos = T, logfc.threshold = 0.1)
-write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos_logfc0.1.csv"))
-
 markers.pos = FindAllMarkers(MTL_obj, only.pos = T)
 write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos.csv"))
-
-
-# markers in MSC-H vs MSC-L
-markers.msc = FindMarkers(MTL_obj, ident.1 = "MSC-H", ident.2 = "MSC-L")
-yaptaz = c("TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1")
-
-
-
 
 
 
@@ -261,23 +250,18 @@ genes = c("CLIC3","LEPR", #osteo
 VlnPlot(MTL_obj, features=genes, ncol=2, pt.size=0) & labs(x=NULL)
 
 
-osteo.counts = markers.pos %>% filter(cluster %in% c("O1","O2")) %>% pull(gene) %>% table
-om = osteo.counts[which(osteo.counts>1)] %>% names
 
-markers.pos %>% group_by(cluster) %>%
-  filter(cluster %in% c("O1","O2")) %>%
-  filter(gene %in% om) %>%
-  slice_max(n = 5, order_by = avg_log2FC)
-
-
-
-# save with harmony coordinates
+# save merged data with harmony coordinates
 saveRDS(MTL_obj, file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 MTL_obj = readRDS(file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 
 
 
 #### SUPPLEMENTAL FIGURE 1: YAP/TAZ in MTL
+
+# markers in MSC-H vs MSC-L
+markers.msc = FindMarkers(MTL_obj, ident.1 = "MSC-H", ident.2 = "MSC-L")
+yaptaz = c("TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1")
 
 # demonstrate YAP1/TAZ transcriptional stimulation
 # genes from MSigDB C2: Curated Canonical Pathways (CP:Reactome): REACTOME_YAP1_AND_WWTR1_TAZ_STIMULATED_GENE_EXPRESSION
