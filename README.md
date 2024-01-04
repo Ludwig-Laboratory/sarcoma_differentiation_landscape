@@ -3,10 +3,10 @@
 This GitHub repository contains all relevant analysis code for the publication:
 
 Mapping the Single-cell Differentiation Landscape of Osteosarcoma 
-Danh Dinh Truong*, Corey Weistuch*, Kevin Murgas*, Joseph Deasy, Antonios G. Mikos, Allen Tannenbaum+, and Joseph Ludwig+
+Danh Dinh Truong*, Corey Weistuch*, Kevin Murgas*, Prasad Admane, Joseph O. Deasy, Antonios G. Mikos, Allen Tannenbaum+, and Joseph Ludwig+
 Under submission.
 
-All code was developed in joint effort by Danh Truong, Kevin Murgas, and Corey Weistuch. Any questions about code implementation are welcome.
+All code was developed in joint effort by Danh Truong, Corey Weistuch, and Kevin Murgas. Any questions about code implementation are welcome.
 
 A summary of the code used in the following analysis steps:
 1. Preparation of RNA-sequencing data (including quality control and pre-processing):
