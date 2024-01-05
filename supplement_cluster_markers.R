@@ -5,7 +5,6 @@
 
 library(tidyverse)
 library(Seurat)
-setwd('/Users/linclab/Documents/Tannenbaum Lab/SarcomaLandscape')
 
 # specify directory to save enrichment results
 resdir = "Results/enrichment"
