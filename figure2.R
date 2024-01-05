@@ -194,8 +194,19 @@ resdir = "Results"
 # write markers to a csv
 write_csv(markers.all, file.path(resdir, "MTL_cluster_markers.csv"))
 
+markers.pos = FindAllMarkers(MTL_obj, only.pos = T, logfc.threshold = 0.1)
+write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos_logfc0.1.csv"))
+
 markers.pos = FindAllMarkers(MTL_obj, only.pos = T)
 write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos.csv"))
+
+
+# markers in MSC-H vs MSC-L
+markers.msc = FindMarkers(MTL_obj, ident.1 = "MSC-H", ident.2 = "MSC-L")
+yaptaz = c("TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1")
+
+
+
 
 
 
@@ -250,18 +261,34 @@ genes = c("CLIC3","LEPR", #osteo
 VlnPlot(MTL_obj, features=genes, ncol=2, pt.size=0) & labs(x=NULL)
 
 
+osteo.counts = markers.pos %>% filter(cluster %in% c("O1","O2")) %>% pull(gene) %>% table
+om = osteo.counts[which(osteo.counts>1)] %>% names
 
-# save merged data with harmony coordinates
+markers.pos %>% group_by(cluster) %>%
+  filter(cluster %in% c("O1","O2")) %>%
+  filter(gene %in% om) %>%
+  slice_max(n = 5, order_by = avg_log2FC)
+
+
+
+# save with harmony coordinates
 saveRDS(MTL_obj, file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 MTL_obj = readRDS(file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
 
+# lastly save the metadata (for later reference)
+write_tsv(MTL_obj@meta.data %>% rownames_to_column("barcode"), file.path(savedir,"cell_metadata_clustered.txt"))
 
 
-#### SUPPLEMENTAL FIGURE 1: YAP/TAZ in MTL
+#### SUPPLEMENTAL FIGURE 1: Cell Cycle Score and YAP/TAZ signature in MTL
 
-# markers in MSC-H vs MSC-L
-markers.msc = FindMarkers(MTL_obj, ident.1 = "MSC-H", ident.2 = "MSC-L")
-yaptaz = c("TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1")
+# cell cycle scoring already computed in mtl_chondro_SCT_qnorm.R
+FeaturePlot(MTL_obj, "G2M.Score", reduction="umap_harmony", cols=c("white","#00BA39"))
+FeaturePlot(MTL_obj, "S.Score", reduction="umap_harmony", cols=c("white","#629DFF"))
+DimPlot(MTL_obj, reduction="umap_harmony", group.by="Phase")
+# bar plot of counts
+MTL_obj@meta.data %>% select(cluster_annotation, Phase) %>%
+  ggplot() + geom_bar(aes(x=cluster_annotation, fill=Phase), position="fill") +
+  theme_classic() + xlab("Cluster") + ylab("Fraction of cells")
 
 # demonstrate YAP1/TAZ transcriptional stimulation
 # genes from MSigDB C2: Curated Canonical Pathways (CP:Reactome): REACTOME_YAP1_AND_WWTR1_TAZ_STIMULATED_GENE_EXPRESSION

@@ -27,7 +27,7 @@ surv = read_tsv("Data/TARGET_OS/from_Xena/TARGET-OS.survival.tsv") %>% as.data.f
 # match the sample indices
 match_ids = match(colnames(arch), surv$sample)
 
-# combine a survival dataframe with archetype scores
+# combine survival dataframe with archetype scores
 surv_arch = cbind(surv[match_ids,] %>% dplyr::select(OS, OS.time),
                   t(arch) ) %>% filter(!is.na(OS))
 
