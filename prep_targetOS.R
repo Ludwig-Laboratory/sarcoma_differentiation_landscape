@@ -13,7 +13,7 @@ targetos = read_delim("Data/TARGET_OS/from_Xena/TARGET-OS.star_counts.tsv")
 targetos = targetos[-c(1:4),] # first 4 rows are mapping statistics
 
 # match ensembl id to HGNC
-library("biomaRt")
+library(biomaRt)
 ensembl_ids = sub("[.][0-9]*","",targetos$Ensembl_ID)
 mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
 gene_IDs <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),
@@ -29,26 +29,30 @@ rownames(exp_mat) = match_genes$hgnc_symbol
 library(preprocessCore)
 library(Seurat)
 
-# define target distribution from MTL dataset
+# first load MTL dataset to define target distribution
 savedir_target = "Data/MTL_OAC_SCT_qnorm"
 MTL_obj = readRDS( file.path(savedir_target,"MTL_OAC_merged_SCT.rds") )
-common.genes = intersect(rownames(exp_mat), rownames(MTL_obj)) # subset only the genes from both MTL and PDX datasets
-length(common.genes) # 18220 genes
-d_target = MTL_obj@assays$SCT@data[common.genes,] # pull SCT data slot for expression target distributions
+gene_names = intersect(rownames(exp_mat), rownames(MTL_obj)) # subset only the genes from both MTL and PDX datasets
+length(gene_names) # 18159 genes
+
+# define target distribution based on MTL expression of shared genes
+d_target = MTL_obj@assays$SCT@data[gene_names,] # pull SCT data slot for expression target distributions
+rm(MTL_obj); gc() # remove Seurat object to save memory
 target = normalize.quantiles.determine.target(d_target %>% as.matrix)
 
 # qnorm with target distribution
-d = exp_mat[common.genes,]
+d = exp_mat[gene_names,]
 dq = normalize.quantiles.use.target(d %>% as.matrix, target)
 rownames(dq) = rownames(d)
 colnames(dq) = colnames(d)
-dim(dq) # 18220 genes x 88 patients
+dim(dq) # 18159 genes x 88 patients
 
 # save as .csv into multiple files separated by sample
-savedir = "Data/TARGET_OS"
+expr_dir = "Data/TARGET_OS/TARGETOS_expr_qnorm"
+if (!dir.exists(expr_dir)) { dir.create(expr_dir) } # create directory if it does not exist
 prec = 5 # precision for tsv (number of digits)
 temp = dq %>% as.matrix
 temp = floor( temp*(10^prec) )/ (10^prec) # this truncates to prec digits for csv
-write_tsv(as.data.frame(temp),file.path(savedir,"target_os.txt"), col_names=T)
-write_tsv(data.frame(SYMBOL=rownames(dq)), file.path(savedir,"gene-conversion.txt"))
+write_tsv(as.data.frame(temp),file.path(expr_dir,"target_os.txt"), col_names=T)
+write_tsv(data.frame(SYMBOL=rownames(dq)), file.path(expr_dir,"gene-conversion.txt"))
 

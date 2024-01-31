@@ -7,26 +7,23 @@ library(ComplexHeatmap)
 
 
 # Figure 2: Mesenchymal Transition Landscape
-
-#Schematic of study design
-#MTL UMAP: clusters, lineage, time (scaled to experiment)
-#- No phase
-#Marker genes: 2 per lineage
+# A: Schematic of study design
+# B-D: MTL UMAP: clusters, lineage, time (scaled to experiment)
+# E: Example marker genes: 2 per lineage
 
 
 
-##### load data #####
+##### load data ##### (if data already saved with harmony correction, skip down to FIGURE 2)
 
 # Load Seurat object from .rds file
 # contains Osteo/Adipo + Chondro data, merged + SCTransform normalized by batch
 datadir = "Data"
 MTL_obj = readRDS( file.path(datadir, "MTL_OAC_SCT_qnorm", "MTL_OAC_merged_SCT.rds") )
 
-# calculate scaled time as time divided by max for that experiment
+# calculate time.scaled as time divided by max for that experiment (adipo=d14, chondro=d42, osteo=d21)
 max.times = MTL_obj@meta.data %>% select(Time,Lineage) %>%
   group_by(Lineage) %>% summarize(max.time = max(Time))
 MTL_obj$time.scaled = MTL_obj$Time / max.times$max.time[match(MTL_obj$Lineage, max.times$Lineage)]
-
 
 
 # run UMAP dimension reduction (PRE harmony batch correction)
@@ -35,8 +32,8 @@ DimPlot(MTL_obj, group.by="Condition", label=T, repel=T) + NoLegend()
 DimPlot(MTL_obj, group.by="Lineage")
 FeaturePlot(MTL_obj, "Time")
 
-# find clusters
-MTL_obj <- FindNeighbors(MTL_obj, dims = 1:10, reduction="harmony")
+# find clusters (before harmony correction)
+MTL_obj <- FindNeighbors(MTL_obj, dims = 1:10)
 MTL_obj <- FindClusters(MTL_obj, resolution = 0.1)
 
 # visualize before harmony
@@ -127,7 +124,7 @@ MTL_obj[["harmony_clusters"]] <- Idents(MTL_obj)
 
 # add manual cluster label annotations
 Idents(MTL_obj) <- MTL_obj[["harmony_clusters"]]
-MTL_obj = RenameIdents(MTL_obj, `0` = "UD",
+MTL_obj = RenameIdents(MTL_obj, `0` = "MSC-C",
                        `1` = "A1",
                        `2` = "O2",
                        `3` = "A3",
@@ -140,11 +137,24 @@ MTL_obj = RenameIdents(MTL_obj, `0` = "UD",
                        `10` = "MSC-L",
                        `11` = "A2",
                        `12` = "A4")
-levels(MTL_obj) <- c("UD", "MSC-H", "MSC-L",
+levels(MTL_obj) <- c("MSC-C", "MSC-H", "MSC-L",
                      "O1", "O2", "A1", "A2", "A3", "A4", "CP", "C1", "C2", "C3")
 MTL_obj$cluster_annotation = Idents(MTL_obj)
 
 
+# save Seurat object with harmony coordinates
+saveRDS(MTL_obj, file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
+
+# save the metadata (for later reference)
+write_tsv(MTL_obj@meta.data %>% rownames_to_column("barcode"), file.path(savedir,"cell_metadata_clustered.txt"))
+
+
+
+##### FIGURE 2 #####
+# load processed data with harmony correction
+MTL_obj = readRDS(file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
+
+### Fig 2B-D:
 # UMAPs: clusters, lineage, time (scaled)
 DimPlot(MTL_obj, reduction = 'umap_harmony', label=T) + theme(legend.position = "bottom", aspect.ratio = 1,
                                                               axis.title.x = element_blank(),
@@ -157,26 +167,6 @@ FeaturePlot(MTL_obj, features = "time.scaled", reduction="umap_harmony") +
   theme(aspect.ratio = 1,
         axis.title.x = element_blank(),
         axis.title.y = element_blank()) & viridis::scale_color_viridis()
-#FeaturePlot(MTL_obj, features = "Time", reduction="umap_harmony") & viridis::scale_color_viridis()
-#DimPlot(MTL_obj, group.by = 'anno', reduction = 'umap_harmony', label=T)
-#DimPlot(MTL_obj, group.by = 'Phase', reduction = 'umap_harmony')
-
-
-# counts of lineage in each cluster
-MTL_obj@meta.data %>% select(Lineage, cluster_annotation) %>%
-  group_by(cluster_annotation) %>% summarize(adipo = sum(Lineage=="Adipo"),#/n(),
-                                           chondro = sum(Lineage=="Chondro"),
-                                           osteo = sum(Lineage=="Osteo")) %>%
-  reshape2::melt() %>%
-  ggplot() + geom_bar(aes(x=cluster_annotation, y=value, fill=variable), stat="identity") +
-  ylab("count")
-
-# fraction of timepoints in each cluster
-MTL_obj@meta.data %>% select(Time, cluster_annotation) %>%
-  group_by(cluster_annotation, Time) %>% summarize(n=n()) %>%
-  filter(cluster_annotation == "A3")
-
-
 
 
 ##### MARKER GENE ANALYSIS #####
@@ -191,12 +181,7 @@ markers.all %>% group_by(cluster) %>%
 
 resdir = "Results"
 
-# write markers to a csv
-write_csv(markers.all, file.path(resdir, "MTL_cluster_markers.csv"))
-
-markers.pos = FindAllMarkers(MTL_obj, only.pos = T, logfc.threshold = 0.1)
-write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos_logfc0.1.csv"))
-
+# write positive gene markers to a csv
 markers.pos = FindAllMarkers(MTL_obj, only.pos = T)
 write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos.csv"))
 
@@ -204,22 +189,22 @@ write_csv(markers.pos, file.path(resdir, "MTL_cluster_markers_pos.csv"))
 # markers in MSC-H vs MSC-L
 markers.msc = FindMarkers(MTL_obj, ident.1 = "MSC-H", ident.2 = "MSC-L")
 yaptaz = c("TEAD1", "TEAD2", "CTGF", "CYR61", "IGFBP5", "ANKRD1")
+VlnPlot(MTL_obj, features=yaptaz, group.by="harmony_clusters", ncol=4, pt.size=0)
 
 
 
 
 
 
-# Marker Gene plots:
-# violins, 2 genes per lineage
+#### Marker Gene Violin plots ####
+# violins, 2 example genes per lineage (one early, one late)
 
+# exploratory
 # violin plots (using clusters)
 genes = c("COL1A1", "COL8A1","MGP","DCN", # osteo markers: also RUNX2, LUM, SPARC, POSTN
           "FABP4", "ADIPOQ", "ACACB", "PLIN1", # adipo markers: also PPARG, CEBPA, LPL, PLIN4
           "COL2A1", "SOX9", "ACAN", "PTHLH") # chondro markers:
-#VlnPlot(MTL_obj, features=genes, group.by="harmony_clusters", ncol=4)
 VlnPlot(MTL_obj, features=genes, group.by="harmony_clusters", ncol=4, pt.size=0)
-
 
 # osteo markers
 genes = c("COL1A1", "COL8A1","MGP","DCN", "RUNX2", "LUM", "SPARC", "POSTN")
@@ -254,6 +239,7 @@ genes = c("MT1X", "MT1E", "MT1M", "MT2A",
 genes = c("CLIC3", "FABP4", "COL2A1", "IGFBP5")
 FeaturePlot(MTL_obj, genes, reduction="umap_harmony")
 
+### Fig 2E:
 # final selected markers
 genes = c("CLIC3","LEPR", #osteo
           "MT1X","FABP4", #adipo
@@ -261,22 +247,7 @@ genes = c("CLIC3","LEPR", #osteo
 VlnPlot(MTL_obj, features=genes, ncol=2, pt.size=0) & labs(x=NULL)
 
 
-osteo.counts = markers.pos %>% filter(cluster %in% c("O1","O2")) %>% pull(gene) %>% table
-om = osteo.counts[which(osteo.counts>1)] %>% names
 
-markers.pos %>% group_by(cluster) %>%
-  filter(cluster %in% c("O1","O2")) %>%
-  filter(gene %in% om) %>%
-  slice_max(n = 5, order_by = avg_log2FC)
-
-
-
-# save with harmony coordinates
-saveRDS(MTL_obj, file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
-MTL_obj = readRDS(file.path(datadir,"MTL_OAC_SCT_qnorm/MTL_OAC_harmony.rds"))
-
-# lastly save the metadata (for later reference)
-write_tsv(MTL_obj@meta.data %>% rownames_to_column("barcode"), file.path(savedir,"cell_metadata_clustered.txt"))
 
 
 #### SUPPLEMENTAL FIGURE 1: Cell Cycle Score and YAP/TAZ signature in MTL

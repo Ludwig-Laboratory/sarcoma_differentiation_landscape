@@ -29,7 +29,7 @@ meta_os = read_delim("Data/OS11_SCT_qnorm/cell_metadata.txt")
 mtl_barcodes = read_csv( file.path(datadir, "MTL_Barcodes.csv"), col_names = F) %>% pull(1)
 meta_mtl_matched = meta_mtl[match(mtl_barcodes, meta_mtl$barcode),] %>%
   mutate(cluster_annotation = factor(cluster_annotation %>% str_remove_all("-"),
-                                     levels = c("UD", "MSCH", "MSCL",
+                                     levels = c("MSC-C", "MSCH", "MSCL",
                                                 "O1", "O2",
                                                 "A1", "A2", "A3", "A4",
                                                 "CP", "C1", "C2", "C3")))
@@ -75,8 +75,6 @@ col_fun = colorRamp2(c(0, 0.25, 0.5), c("#009FFF", "#FFFF00", "#FF5100"))
 gg_color_hue <- function(n) {hues = seq(15, 375, length = n + 1); hcl(h = hues, l = 65, c = 100)[1:n]}
 cluster_colors = gg_color_hue(nlevels(meta_mtl_matched$cluster_annotation)) %>%
   setNames(levels(meta_mtl_matched$cluster_annotation))
-lineage_colors = gg_color_hue(3) %>% setNames( unique(meta_mtl_matched$Lineage) )
-lineage2_colors = gg_color_hue(4) %>% setNames( unique(meta_mtl_matched$Lineage2) )
 
 pdf( file.path(outdir, "MTL_Arch_Heatmap.pdf"),
      width=9, height=4)
@@ -84,16 +82,10 @@ Heatmap(x, name = "NMF Score", col = col_fun,
         cluster_rows = F, row_names_side = "left",
         row_title = "Archetype", row_title_side = "left",
         column_split = meta_mtl_matched$cluster_annotation, cluster_column_slices = F,
-        #column_dend_reorder = meta_mtl_matched$time.scaled,
-        #column_order = order(meta_mtl_matched$time.scaled),
-        show_column_dend = F, show_column_names = F, 
+        column_dend_reorder = meta_mtl_matched$time.scaled, show_column_dend = F, show_column_names = F, 
         column_title = "%s", column_title_rot = 45, column_title_gp = gpar(fontsize=9),
         top_annotation = HeatmapAnnotation(cluster = meta_mtl_matched$cluster_annotation,
-                                           #lineage = meta_mtl_matched$Lineage,
-                                           #time_scaled = meta_mtl_matched$time.scaled,
-                                           col = list(cluster=cluster_colors,
-                                                      lineage=lineage_colors,
-                                                      time_scaled = colorRamp2(c(0,1),c("lightyellow","forestgreen"))),
+                                           col = list(cluster=cluster_colors),
                                            show_legend = c(F))
 )
 dev.off()
@@ -164,8 +156,6 @@ Heatmap(x, name = "Correlation",
         cluster_columns = F,
         column_title = "Gene", column_title_side = "bottom")
 dev.off()
-
-
 
 
 

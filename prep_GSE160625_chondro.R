@@ -70,7 +70,7 @@ discard.mito <- isOutlier(obj.sce$percent.mt, type="higher", batch=obj.sce$orig.
 discard.counts <- isOutlier(obj.sce$nCount_RNA, log = TRUE, type="lower", batch=obj.sce$orig.ident)
 discard.features <- isOutlier(obj.sce$nFeature_RNA, log = TRUE, type="lower", batch=obj.sce$orig.ident)
 
-# filter based on: remove outliers with >3 mad in mito-mapped reads, <3 mad in nCount (total reads) or nFeature (unique genes mapped)
+# filter low quality cells based on: outliers with >3 mad in mito-mapped reads, <3 mad in nCount (total reads) or nFeature (unique genes mapped)
 # also include a hard cutoff filter of mito<25%, nCount>1000, nFeature>500
 obj.filt <- subset(obj, subset = !(discard.mito | discard.counts | discard.features) &
                        percent.mt < 25 & nCount_RNA > 1000 & nFeature_RNA > 500)
@@ -86,81 +86,13 @@ FeatureScatter(obj.filt, 'percent.mt', 'nFeature_RNA', pt.size = 0.1) + NoLegend
   xlim(0,100) + scale_y_log10(limits=c(500,10000))
 
 
-##### DATA EXPLORATION #####
-
-# SCTransform normalization
-obj <- obj.filt
-obj <- SCTransform(obj, verbose = TRUE, variable.features.n= NULL)
-
-# cell cycle scoring
-s.genes <- cc.genes.updated.2019$s.genes # cc.genes or cc.genes.updated.2019, depends on the names of genes in the data
-g2m.genes <- cc.genes$g2m.genes
-obj <- CellCycleScoring(obj, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
-
-# dimensional reduction (PCA then UMAP)
-obj <- RunPCA(obj)
-elbow <- PCAtools::findElbowPoint(obj@reductions[["pca"]]@stdev)
-ElbowPlot(obj,ndims = 50) + geom_vline(xintercept = elbow, linetype="dashed", 
-                                       color = "blue", size=1.5)
-obj <- RunUMAP(obj, dims = 1:50)
-DimPlot(obj, group.by = 'Condition')
-
-# clustering
-obj <- FindNeighbors(obj, k.param = 100)
-obj <- FindClusters(obj, algorithm = 1, resolution  = 0.02)
-DimPlot(obj, group.by = c('Condition', 'seurat_clusters'))
-
-
-# harmony
-#tau protects overclustering small datasets 
-#theta is the diversity clustering penalty. high numbers encourage more diversity
-#max.iter.harmony = 40, theta = 4, lambda = 1, dims.use = 1:50, tau = 300
-library(harmony)
-obj <- RunHarmony(obj, group.by.vars = 'Condition', assay.use = 'SCT',
-                  max.iter.harmony = 40, theta = 4, lambda = 0.7, dims.use = 1:50, tau = 300)
-obj <- RunUMAP(obj, dims = 1:20, reduction = 'harmony', reduction.name = 'umap_harmony')
-DimPlot(obj, group.by = 'Condition', reduction = 'umap') +
-DimPlot(obj, group.by = 'Condition', reduction = 'umap_harmony')
-
-
-# examine chondro markers:
-# pluri: OCT4=POU5F1*, NANOG*
-# Scler: SOX9*, PDGFRA, PDGFRB
-# chondro: COL2A1, ACAN, MATN4, COL9A3
-# neurogenic: SOX2*, OTX1*, PAX6*
-# melanocyte: MITF*
-# mesenchyme: ACTA1, COL1A1, COL3A1
-# prolif: TUBA1B, HIST1H4C, STMN1
-Idents(obj) <- obj$Condition
-fs = c("POU5F1", "NANOG",
-       "SOX9",
-       "COL2A1", "ACAN", "MATN4", "COL9A3",
-       "SOX2", "OTX1", "PAX6", "MITF",
-       "COL1A1", "COL3A1",
-       "TUBA1B", "HIST1H4C", "STMN1")
-VlnPlot(obj, features=fs, group.by = 'Condition')
-
-FeaturePlot(obj, features = c("POU5F1", "NANOG", "SOX9", "PDGFRA"), label=T) # iPSC, Scl markers
-FeaturePlot(obj, features = c("COL2A1", "ACAN", "MATN4", "COL9A3"), label=T) # chondro markers
-FeaturePlot(obj, features = c("SOX2", "OTX1", "PAX6", "MITF"), label=T) # non-chondro (neuro/melano) markers
-FeaturePlot(obj, features = c("TUBA1B", "HIST1H4C", "STMN1", "MCM5"), label=T)
-DimPlot(obj, group.by = "Phase")
-FeaturePlot(obj, features="Time")
-
+##### SAVE DATA #####
 
 # subset specific conditions within C59-treated differentiation timecourse
 keep_cond = c("Cp", "C59_D7", "C59_D14", "C59_D28", "C59_D42")
-obj.subset = obj[,obj$Condition %in% keep_cond]
-obj.subset <- RunPCA(obj.subset) %>% RunUMAP(dims = 1:50)
-obj.subset <- RunHarmony(obj.subset, group.by.vars = 'Condition', assay.use = 'SCT',
-                  max.iter.harmony = 40, theta = 4, lambda = 0.7, dims.use = 1:50, tau = 300)
-obj.subset <- RunUMAP(obj.subset, dims = 1:20, reduction = 'harmony', reduction.name = 'umap_harmony')
-DimPlot(obj.subset, group.by = 'Condition', reduction = 'umap') +
-DimPlot(obj.subset, group.by = 'Condition', reduction = 'umap_harmony')
+obj.subset = obj.filt[,obj.filt$Condition %in% keep_cond]
 
-FeaturePlot(obj.subset, features = "Time")
-DimPlot(obj.subset, group.by = "Phase")
-
-saveRDS(obj, "GSE160625_filtnorm_all_seurat.RDS")
+# save all data and C59 subset data Seurat objects
+saveRDS(obj.filt, "GSE160625_filtnorm_all_seurat.RDS")
 saveRDS(obj.subset, "GSE160625_filtnorm_C59subset_seurat.RDS")
 
